@@ -18,3 +18,32 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm test
+  self-host:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Start a fresh deployment
+        run: |
+          umask 077
+          echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)" > .env
+          echo "MAILOOP_DB_PASSWORD=$(openssl rand -hex 24)" >> .env
+          echo "MAILOOP_MASTER_KEY=$(openssl rand -base64 32)" >> .env
+          docker compose up -d --build
+          curl -fsS --retry 30 --retry-all-errors --retry-delay 2 http://localhost:8080/workspace >/dev/null
+      - name: Create a campaign and restore its database backup
+        run: |
+          set -euo pipefail
+          link=$(docker compose run --rm -T migrate node --import tsx scripts/manage.ts workspace QA | tail -1)
+          owner=${link##*#token=}
+          echo "::add-mask::$owner"
+          origin=http://localhost:8080/v1/outreach
+          id=$(curl -fsS -H "Authorization: Bearer $owner" -H 'Content-Type: application/json' -d '{"name":"Restore check","brief":"Coffee","purpose":"Test","region":"JP"}' "$origin/campaigns" | jq -er .id)
+          docker compose restart web
+          curl -fsS --retry 15 --retry-all-errors --retry-delay 1 -H "Authorization: Bearer $owner" "$origin/campaigns/$id" | jq -e '.campaign.name=="Restore check"'
+          docker compose exec -T db pg_dump -Fc -U postgres postgres > "$RUNNER_TEMP/backup.dump"
+          docker compose exec -T db createdb -U postgres restore_check
+          docker compose exec -T db pg_restore -U postgres -d restore_check --exit-on-error < "$RUNNER_TEMP/backup.dump"
+          test "$(docker compose exec -T db psql -U postgres -d restore_check -Atc "SELECT count(*) FROM mailoop.programs WHERE id='$id'")" = 1
+      - if: always()
+        run: docker compose down -v

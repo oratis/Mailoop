@@ -1,6 +1,7 @@
 import { MailoopClient } from '../packages/client.ts';
+import {readFile} from 'node:fs/promises';
 
-const usage = 'mailoop <list | create NAME | show ID | approve ID REVISION | events ID [AFTER]>';
+const usage = 'mailoop <list | create NAME | show ID | approve ID REVISION | events ID [AFTER] | outreach METHOD PATH [JSON_FILE]>';
 
 async function main() {
   const [command, ...args] = process.argv.slice(2);
@@ -8,6 +9,13 @@ async function main() {
   const { MAILOOP_URL, MAILOOP_TOKEN } = process.env;
   if (!MAILOOP_URL || !MAILOOP_TOKEN) throw new Error('Set MAILOOP_URL and MAILOOP_TOKEN from the local demo.');
   const client = new MailoopClient(MAILOOP_URL.replace(/\/$/, ''), MAILOOP_TOKEN);
+  if(command==='outreach'){
+    const [method,path,file]=args;
+    if(!['GET','POST','PATCH','DELETE'].includes(method)||!path||!/^[-\w/?=&.%]+$/.test(path)||path.startsWith('/')||path.includes('..'))throw Error(usage);
+    const res=await fetch(new URL('/v1/outreach/'+path,MAILOOP_URL),{method,redirect:'error',headers:{Authorization:'Bearer '+MAILOOP_TOKEN,'Content-Type':'application/json'},
+      body:file?JSON.stringify(JSON.parse(await readFile(file,'utf8'))):['POST','PATCH'].includes(method)?'{}':undefined});
+    const data=await res.json();if(!res.ok)throw Error(data.error??String(res.status));return data;
+  }
   switch (command) {
     case 'list': if (!args.length) return client.campaigns(); break;
     case 'create': if (args.length) return client.create(args.join(' ')); break;

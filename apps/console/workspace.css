@@ -1,0 +1,94 @@
+.toolbar,
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+.toolbar {
+  justify-content: space-between;
+}
+.tabs {
+  border-bottom: 1px solid #c6d4c7;
+  padding: 0 0 0.7rem;
+}
+.tabs button,
+.subtle {
+  background: #e1e8dc;
+  color: #254234;
+}
+.tabs button[aria-current='true'] {
+  background: #205440;
+  color: white;
+}
+.workgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: 1.2rem;
+  align-items: start;
+}
+.workgrid section,
+main > section {
+  background: #fffefa;
+  border: 1px solid #d7dfd5;
+  border-radius: 10px;
+  padding: 1.4rem;
+}
+.workspace-form {
+  display: grid;
+  gap: 0.7rem;
+  margin: 1.1rem 0;
+}
+.workspace-form > button {
+  justify-self: start;
+}
+label input,
+label select,
+label textarea {
+  display: block;
+  width: 100%;
+  margin-top: 0.28rem;
+}
+select,
+textarea {
+  border: 1px solid #aab8ac;
+  background: white;
+  border-radius: 5px;
+  font: inherit;
+  padding: 0.5rem;
+}
+textarea {
+  min-height: 4.5rem;
+  resize: vertical;
+}
+details {
+  border-top: 1px solid #d7dfd5;
+  padding: 0.8rem 0;
+  overflow-wrap: anywhere;
+}
+summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.check input {
+  display: inline;
+  width: auto;
+}
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
+td,
+th {
+  padding: 0.5rem;
+  text-align: left;
+  border-bottom: 1px solid #d7dfd5;
+}
+[role='status'] {
+  color: #205440;
+}
