@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Mailoop research import v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "runId", "briefRevision", "researchedAt", "candidates"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "runId": { "type": "string", "pattern": "^[A-Za-z0-9_-]{3,100}$" },
+    "briefRevision": { "type": "string", "minLength": 1 },
+    "researchedAt": { "type": "string", "format": "date-time" },
+    "candidates": {
+      "type": "array",
+      "maxItems": 100,
+      "items": { "$ref": "#/$defs/candidate" }
+    }
+  },
+  "$defs": {
+    "url": { "type": "string", "format": "uri", "pattern": "^https?://" },
+    "text": { "type": "string", "minLength": 1, "maxLength": 1000 },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["displayName", "language", "channelUrl", "matchReason", "work", "contacts"],
+      "properties": {
+        "displayName": { "$ref": "#/$defs/text" },
+        "language": { "$ref": "#/$defs/text" },
+        "channelUrl": { "$ref": "#/$defs/url" },
+        "matchReason": { "$ref": "#/$defs/text" },
+        "work": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["url", "publishedOn"],
+          "properties": {
+            "url": { "$ref": "#/$defs/url" },
+            "publishedOn": { "type": ["string", "null"], "format": "date" }
+          }
+        },
+        "contacts": {
+          "type": "array",
+          "maxItems": 8,
+          "items": { "oneOf": [{ "$ref": "#/$defs/publicContact" }, { "$ref": "#/$defs/vendorContact" }] }
+        },
+        "missingReason": { "$ref": "#/$defs/text" }
+      },
+      "if": { "properties": { "contacts": { "maxItems": 0 } } },
+      "then": { "required": ["missingReason"] },
+      "else": { "not": { "required": ["missingReason"] } }
+    },
+    "publicContact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "address", "evidenceUrl", "evidenceExcerpt", "observedAt"],
+      "properties": {
+        "source": { "const": "public_business_page" },
+        "address": { "type": "string", "format": "email", "maxLength": 254 },
+        "evidenceUrl": { "$ref": "#/$defs/url" },
+        "evidenceExcerpt": { "$ref": "#/$defs/text" },
+        "observedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "vendorContact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "address", "vendor", "recordRef", "observedAt"],
+      "properties": {
+        "source": { "const": "licensed_vendor" },
+        "address": { "type": "string", "format": "email", "maxLength": 254 },
+        "vendor": { "$ref": "#/$defs/text" },
+        "recordRef": { "$ref": "#/$defs/text" },
+        "observedAt": { "type": "string", "format": "date-time" }
+      }
+    }
+  }
+}

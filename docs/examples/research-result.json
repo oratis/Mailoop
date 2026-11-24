@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "runId": "run_demo_coffee_01",
+  "briefRevision": "brief_demo_v1",
+  "researchedAt": "2026-11-19T09:00:00Z",
+  "candidates": [
+    {
+      "displayName": "Demo Coffee Studio",
+      "language": "ja",
+      "channelUrl": "https://coffee-studio.example/channel",
+      "matchReason": "近期发布了日语手冲教程，主页列有商务合作入口。",
+      "work": {
+        "url": "https://coffee-studio.example/works/pour-over",
+        "publishedOn": "2026-11-01"
+      },
+      "contacts": [
+        {
+          "source": "public_business_page",
+          "address": "partnerships@coffee-studio.example",
+          "evidenceUrl": "https://coffee-studio.example/partnerships",
+          "evidenceExcerpt": "コラボレーションのお問い合わせは partnerships@coffee-studio.example まで。",
+          "observedAt": "2026-11-19T08:55:00Z"
+        }
+      ]
+    },
+    {
+      "displayName": "Demo Filter Notes",
+      "language": "ja",
+      "channelUrl": "https://filter-notes.example/channel",
+      "matchReason": "作品符合语言和时间要求，未查到明确的合作邮箱。",
+      "work": {
+        "url": "https://filter-notes.example/works/first-brew",
+        "publishedOn": "2026-10-20"
+      },
+      "contacts": [],
+      "missingReason": "no_public_business_contact"
+    }
+  ]
+}
