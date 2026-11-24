@@ -33,9 +33,11 @@ const pool = new pg.Pool({ connectionString: url, max: 12 }),
     allowReal: process.env.MAILOOP_SEND_ENABLED === 'true',
     defaultWorkspace: true
   };
+const shutdown = new AbortController();
 let stopping = false;
 const stop = () => {
   stopping = true;
+  shutdown.abort();
 };
 process.once('SIGTERM', stop);
 process.once('SIGINT', stop);
@@ -45,24 +47,33 @@ try {
   } = await pool.query('SELECT rolsuper,rolbypassrls FROM pg_roles WHERE rolname=current_user');
   if (role.rolsuper || role.rolbypassrls) throw new Error('Use the dedicated runtime database login.');
   if (process.argv[2] === 'worker') {
-    let nextCleanup = 0;
-    while (!stopping) {
-      const workspaces = (await pool.query('SELECT id FROM mailoop.workspaces ORDER BY id')).rows;
-      const clean = Date.now() >= nextCleanup;
-      if (clean) nextCleanup = Date.now() + 3600000;
-      for (const { id } of workspaces) {
+    async function loop(task: (ws: string) => Promise<unknown>, interval: number) {
+      while (!stopping) {
         try {
-          if (clean) await cleanup(pool, id, settings.vault);
-          await deliveryTick(pool, id, settings.vault, settings.base, settings.allowReal);
-          await syncTick(pool, id, settings.vault);
-          await researchTick(pool, id, settings.vault, settings.base);
-        } catch (e) {
-          console.error('Workspace task failed', e instanceof Error ? e.name : 'Error');
+          const { rows } = await pool.query('SELECT id FROM mailoop.workspaces ORDER BY id');
+          for (let offset = 0; offset < rows.length && !stopping; offset += 4) {
+            const results = await Promise.allSettled(
+              rows.slice(offset, offset + 4).map(({ id }) => task(id))
+            );
+            for (const result of results)
+              if (result.status === 'rejected')
+                console.error(
+                  'Workspace task failed',
+                  result.reason instanceof Error ? result.reason.name : 'Error'
+                );
+          }
+        } catch (error) {
+          console.error('Worker polling failed', error instanceof Error ? error.name : 'Error');
         }
-        if (stopping) break;
+        if (!stopping) await delay(interval, undefined, { signal: shutdown.signal }).catch(() => {});
       }
-      if (!stopping) await delay(900);
     }
+    await Promise.all([
+      loop((ws) => deliveryTick(pool, ws, settings.vault, settings.base, settings.allowReal), 900),
+      loop((ws) => syncTick(pool, ws, settings.vault), 1500),
+      loop((ws) => researchTick(pool, ws, settings.vault, settings.base), 900),
+      loop((ws) => cleanup(pool, ws, settings.vault), 3600000)
+    ]);
   } else {
     const server = createApi(pool, settings);
     const done = new Promise<void>((resolve) => {

@@ -96,6 +96,11 @@ function confirmed(value: unknown) {
   if (typeof value !== 'string' || !value.trim()) throw new Error('Missing provider receipt.');
   return value;
 }
+export class CloudDraft extends RequestError {
+  constructor(readonly draftId: string) {
+    super(403, 'Feishu mailbox permits cloud drafts only.');
+  }
+}
 export async function submitMail(m: MailAccount, e: Envelope, approved?: Buffer) {
   if (m.provider === 'simulated') return 'sim-' + e.id;
   const raw = approved ?? (await mime(e)),
@@ -138,8 +143,7 @@ export async function submitMail(m: MailAccount, e: Envelope, approved?: Buffer)
       token,
       post({})
     );
-    if (sent.data?.automation_send_disable)
-      throw new RequestError(403, 'Feishu mailbox permits cloud drafts only.');
+    if (sent.data?.automation_send_disable) throw new CloudDraft(did);
     return String(sent.data?.message_id ?? did);
   }
   if (m.provider === 'graph') {

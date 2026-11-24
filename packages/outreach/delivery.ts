@@ -5,6 +5,7 @@ import { accessMailbox, MailboxError } from './mailbox-auth.ts';
 import { gates, suppress, type LetterBody } from './letters.ts';
 import { record } from './context.ts';
 import {
+  CloudDraft,
   messageId,
   readRelated,
   reconcileMail,
@@ -78,7 +79,7 @@ export async function deliveryTick(
     const {
       rows: [l]
     } =
-      await db.query(`SELECT * FROM letters WHERE status IN ('scheduled','submitting','unknown','accepted')
+      await db.query(`SELECT * FROM letters WHERE status IN ('scheduled','submitting','unknown','accepted','provider_draft')
       AND due_at<=now() AND (status<>'accepted' OR NOT EXISTS(SELECT 1 FROM prospects p WHERE p.id=letters.prospect_id AND p.erased_at IS NOT NULL)) ORDER BY due_at,id LIMIT 1 FOR UPDATE SKIP LOCKED`);
     if (!l) return null;
     const { row, reason } = await gates(db, l.id);
@@ -161,6 +162,7 @@ export async function deliveryTick(
   if (!job) return false;
   const { l, account, draft, campaign, contact } = job;
   let retryAfterMs = 300000;
+  let cloudDraft: string | undefined;
   let receipt: string | undefined,
     errorCode: string | undefined,
     definitive = false,
@@ -189,6 +191,7 @@ export async function deliveryTick(
       related = await readRelated(account, { ...l, scanUntil }, draft.to);
     else receipt = await reconcileMail(account, l.id);
   } catch (e) {
+    if (e instanceof CloudDraft) cloudDraft = e.draftId;
     if (e instanceof MailboxError && e.retryAfterMs)
       retryAfterMs = Math.max(retryAfterMs, e.retryAfterMs);
     errorCode = e instanceof RequestError ? 'provider_' + e.status : 'connection_interrupted';
@@ -221,10 +224,25 @@ export async function deliveryTick(
       ]);
       await record(db, ws, campaign, 'dispatch.accepted', l.id, null);
     } else {
-      const status = definitive ? (errorCode === 'provider_429' ? 'scheduled' : 'held') : 'unknown';
+      const status =
+        cloudDraft || l.status === 'provider_draft'
+          ? 'provider_draft'
+          : definitive
+            ? errorCode === 'provider_429'
+              ? 'scheduled'
+              : 'held'
+            : 'unknown';
       await db.query(
-        "UPDATE letters SET status=$2,reason=$3,lease_id=NULL,due_at=now()+$4*interval '1 millisecond' WHERE id=$1",
-        [l.id, status, errorCode ?? 'reconciliation_inconclusive', retryAfterMs]
+        "UPDATE letters SET status=$2,reason=$3,receipt=coalesce($5,receipt),lease_id=NULL,due_at=now()+$4*interval '1 millisecond' WHERE id=$1",
+        [
+          l.id,
+          status,
+          status === 'provider_draft'
+            ? 'awaiting_mailbox_owner'
+            : (errorCode ?? 'reconciliation_inconclusive'),
+          retryAfterMs,
+          cloudDraft ?? null
+        ]
       );
       if (l.status !== status) await record(db, ws, campaign, 'dispatch.' + status, l.id, null);
     }

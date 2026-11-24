@@ -67,7 +67,7 @@ async function overview(ctx: Context, campaign: string) {
     return { campaign: p, summary, prospects, runs, events, letters: [], inbox: [] };
   const letters = (
     await ctx.db.query(
-      `SELECT l.id,l.revision,l.step,l.status,l.reason,l.mailbox_id,l.prospect_id,l.sealed,l.approved_by,l.accepted_at FROM letters l JOIN prospects r ON r.id=l.prospect_id WHERE r.program_id=$1 ORDER BY l.created_at DESC`,
+      `SELECT l.id,l.revision,l.step,l.status,l.reason,l.mailbox_id,l.prospect_id,l.sealed,l.approved_by,l.accepted_at,l.receipt FROM letters l JOIN prospects r ON r.id=l.prospect_id WHERE r.program_id=$1 ORDER BY l.created_at DESC`,
       [campaign]
     )
   ).rows.map(({ sealed, ...r }) => ({ ...r, ...ctx.vault.open<LetterBody>(ws, sealed) }));

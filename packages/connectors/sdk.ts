@@ -31,7 +31,59 @@ export function registerConnector(plugin: MailboxExtension) {
   registry.set(plugin.id, plugin);
 }
 export const connector = (provider: string) => registry.get(provider);
-export const installedConnectors = () => [...registry.values()].map(({ id, name }) => ({ id, name }));
+const builtins = [
+  {
+    id: 'gmail',
+    name: 'Gmail',
+    auth: 'oauth',
+    sync: 'Gmail history and thread lookup',
+    cloudDraft: false
+  },
+  { id: 'feishu', name: 'Feishu Mail', auth: 'oauth', sync: 'Paged time windows', cloudDraft: true },
+  {
+    id: 'graph',
+    name: 'Microsoft 365',
+    auth: 'oauth',
+    sync: 'Graph delta and conversation lookup',
+    cloudDraft: false
+  },
+  { id: 'nylas', name: 'Nylas', auth: 'oauth', sync: 'Hosted thread API', cloudDraft: false },
+  {
+    id: 'smtp',
+    name: 'SMTP and IMAP',
+    auth: 'app-password',
+    sync: 'IMAP references search',
+    cloudDraft: false
+  },
+  {
+    id: 'simulated',
+    name: 'Local simulator',
+    auth: 'local',
+    sync: 'Durable fixture receipts',
+    cloudDraft: false
+  }
+];
+export function installedConnectors() {
+  return [
+    ...builtins.map((c) => ({
+      ...c,
+      configured:
+        c.auth === 'oauth'
+          ? Boolean(
+              process.env['MAILOOP_' + c.id.toUpperCase() + '_CLIENT_ID'] &&
+                process.env['MAILOOP_' + c.id.toUpperCase() + '_CLIENT_SECRET']
+            )
+          : c.id === 'simulated' || !!process.env.MAILOOP_MAIL_HOSTS
+    })),
+    ...Array.from(registry.values(), ({ id, name }) => ({
+      id,
+      name,
+      auth: 'extension',
+      sync: 'Extension lookup',
+      configured: true
+    }))
+  ];
+}
 export async function loadExtensions(list = process.env.MAILOOP_CONNECTOR_MODULES ?? '') {
   for (const entry of list
     .split(',')

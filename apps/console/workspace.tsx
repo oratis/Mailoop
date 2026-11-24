@@ -18,6 +18,7 @@ type Creator = Candidate & { id: string; verified: boolean; shortlisted: boolean
 type Letter = {
   id: string;
   revision: string;
+  receipt?: string;
   prospect_id: string;
   status: string;
   reason?: string;
@@ -676,6 +677,9 @@ function App() {
                       {l.from} → {l.to}
                     </p>
                     <pre>{l.body}</pre>
+                    {l.status === 'provider_draft' && (
+                      <p>Cloud draft {l.receipt} is awaiting action in the member’s mailbox.</p>
+                    )}
                     <p>Each approved message includes the workspace unsubscribe link.</p>
                     {reviewer && ['draft', 'held'].includes(l.status) && (
                       <label className="check">

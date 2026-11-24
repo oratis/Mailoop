@@ -184,7 +184,7 @@ export async function gates(db: PoolClient, letterId: string) {
     EXISTS(SELECT 1 FROM consents c WHERE c.contact_key=r.contact_key AND c.purpose=p.purpose AND c.region=p.region AND c.expires_at>now()) AS consent,
     EXISTS(SELECT 1 FROM suppressions s WHERE s.contact_key=r.contact_key) AS suppressed,
     EXISTS(SELECT 1 FROM letters x JOIN prospects y ON y.id=x.prospect_id WHERE x.id<>l.id AND x.step='first' AND y.contact_key=r.contact_key AND
-      (x.status IN ('scheduled','submitting','unknown') OR x.accepted_at>now()-interval '30 days')) AS cooldown,
+      (x.status IN ('scheduled','submitting','unknown','provider_draft') OR x.accepted_at>now()-interval '30 days')) AS cooldown,
     EXISTS(SELECT 1 FROM letters parent WHERE parent.id=l.parent_id AND parent.checked_at>now()-interval '10 minutes') AS recently_checked,
     EXISTS(SELECT 1 FROM inbound i JOIN letters x ON x.id=i.letter_id WHERE x.prospect_id=r.id AND i.kind NOT IN ('auto_reply','soft_bounce')) AS inbound_seen
     FROM letters l JOIN prospects r ON r.id=l.prospect_id JOIN programs p ON p.id=r.program_id JOIN mailboxes m ON m.id=l.mailbox_id WHERE l.id=$1`,
