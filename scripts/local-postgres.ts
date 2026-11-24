@@ -25,8 +25,17 @@ export async function startLocalPostgres() {
   });
   const exited = once(child, 'exit');
   const pool = new pg.Pool({ user: 'postgres', password, database: 'postgres', host: '127.0.0.1', port });
+  // pg-pool can finish removing idle clients while their sockets are still
+  // closing. Keep the server alive until each PostgreSQL connection has ended.
+  const openSockets = new Set<Promise<void>>();
+  pool.on('connect', client => {
+    const closed = new Promise<void>(resolve => client.once('end', resolve));
+    openSockets.add(closed);
+    void closed.then(() => openSockets.delete(closed));
+  });
   async function close() {
     await pool.end();
+    await Promise.all(openSockets);
     if (child.connected) child.disconnect();
     await exited;
     await rm(directory, { recursive: true, force: true });
