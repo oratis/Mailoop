@@ -1,3 +1,5 @@
+import { mergeChannels, relatedCampaigns, setContact } from './relationships.ts';
+import { eraseCreator, policy } from './retention.ts';
 import { installedSkills } from './skills.ts';
 import { installedConnectors } from '../connectors/sdk.ts';
 import { bridgeSecret, unmatched } from './ingress.ts';
@@ -39,7 +41,7 @@ async function overview(ctx: Context, campaign: string) {
   const ws = ctx.member.workspaceId;
   const prospects = (
     await ctx.db.query(
-      'SELECT id,sealed,evidence_ok,shortlisted,stage FROM prospects WHERE program_id=$1 ORDER BY channel_key',
+      'SELECT id,sealed,(evidence_ok AND evidence_until>now()) AS evidence_ok,shortlisted,stage FROM prospects WHERE program_id=$1 ORDER BY channel_key',
       [campaign]
     )
   ).rows.map((r) => ({
@@ -71,7 +73,7 @@ async function overview(ctx: Context, campaign: string) {
   ).rows.map(({ sealed, ...r }) => ({ ...r, ...ctx.vault.open<LetterBody>(ws, sealed) }));
   const inbox = (
     await ctx.db.query(
-      `SELECT i.id,i.kind,i.received_at,i.handled_at,i.letter_id,i.sealed FROM inbound i JOIN letters l ON l.id=i.letter_id JOIN prospects r ON r.id=l.prospect_id WHERE r.program_id=$1 ORDER BY i.received_at DESC LIMIT 200`,
+      `SELECT i.id,i.kind,i.received_at,i.handled_at,i.assignee_id,i.letter_id,i.sealed FROM inbound i JOIN letters l ON l.id=i.letter_id JOIN prospects r ON r.id=l.prospect_id WHERE r.program_id=$1 ORDER BY i.received_at DESC LIMIT 200`,
       [campaign]
     )
   ).rows.map(({ sealed, ...r }) => ({ ...r, text: ctx.vault.open<{ text: string }>(ws, sealed).text }));
@@ -81,6 +83,10 @@ export async function dispatchRoute(ctx: Context, url: URL, method: string, b: I
   const [resource, key, action, extra] = url.pathname.slice('/v1/outreach/'.length).split('/');
   if (extra) throw new RequestError(404, 'Unknown endpoint.');
   const ws = ctx.member.workspaceId;
+  if (resource === 'policy' && !key && ['GET', 'POST'].includes(method))
+    return policy(ctx, method === 'POST' ? b : undefined);
+  if (resource === 'creators' && key && !action && method === 'DELETE')
+    return eraseCreator(ctx, id(key));
   if (resource === 'skills' && method === 'GET') return installedSkills(key);
   if (resource === 'connectors' && method === 'GET') return installedConnectors();
   if (resource === 'members' && !key) {
@@ -228,7 +234,7 @@ export async function dispatchRoute(ctx: Context, url: URL, method: string, b: I
     if (!key && method === 'GET')
       return (
         await ctx.db.query(
-          `SELECT DISTINCT m.id,m.address,m.provider,m.cap,m.active,m.owner_id,m.synced_at
+          `SELECT DISTINCT m.id,m.address,m.provider,m.cap,m.active,m.owner_id,m.synced_at,m.sync_error
       FROM mailboxes m WHERE m.owner_id=$1 OR EXISTS(SELECT 1 FROM delegations d JOIN programs p ON p.id=d.program_id
       WHERE d.mailbox_id=m.id AND (p.owner_id=$1 OR $2='admin' OR EXISTS(SELECT 1 FROM program_members a WHERE a.program_id=p.id AND a.member_id=$1)))`,
           [ctx.member.id, ctx.member.role]
@@ -238,6 +244,8 @@ export async function dispatchRoute(ctx: Context, url: URL, method: string, b: I
     if (method === 'POST' && !key) return directMailbox(ctx, b);
     if (method === 'POST' && key && action === 'grant') return grantMailbox(ctx, id(key), b);
   }
+  if (method === 'GET' && resource === 'creators' && key && action === 'relationships')
+    return relatedCampaigns(ctx, id(key));
   if (method === 'POST' && resource === 'creators' && key) {
     const k = id(key);
     if (action === 'shortlist') {
@@ -251,6 +259,8 @@ export async function dispatchRoute(ctx: Context, url: URL, method: string, b: I
       });
       return { selected: b.selected };
     }
+    if (action === 'merge') return mergeChannels(ctx, k, id(b.duplicateId));
+    if (action === 'contact') return setContact(ctx, k, b.index);
     if (action === 'permission') return attest(ctx, k, b);
     if (action === 'drafts') return makeDraft(ctx, k, b);
     if (action === 'outcome') return outcome(ctx, k, b);
@@ -264,6 +274,16 @@ export async function dispatchRoute(ctx: Context, url: URL, method: string, b: I
   }
   if (resource === 'letters' && key) {
     const k = id(key);
+    if (method === 'GET' && action === 'history') {
+      requireRole(ctx, 'reviewer', 'operator');
+      await letter(ctx, k);
+      return (
+        await ctx.db.query(
+          'SELECT revision,sealed,superseded_at FROM draft_history WHERE letter_id=$1 ORDER BY superseded_at DESC',
+          [k]
+        )
+      ).rows.map(({ sealed, ...r }) => ({ ...r, ...ctx.vault.open<LetterBody>(ws, sealed) }));
+    }
     if (method === 'PATCH' && !action) return editDraft(ctx, k, b);
     if (method === 'POST' && action === 'cancel') {
       requireRole(ctx, 'operator', 'reviewer');
@@ -319,9 +339,22 @@ export async function dispatchRoute(ctx: Context, url: URL, method: string, b: I
     const row = (await ctx.db.query('SELECT * FROM inbound WHERE id=$1', [id(key)])).rows[0];
     if (!row) throw new RequestError(404, 'No such reply.');
     const l = await letter(ctx, row.letter_id);
+    if (b.action === 'claim') {
+      const assigned = await ctx.db.query(
+        'UPDATE inbound SET assignee_id=$2 WHERE id=$1 AND (assignee_id IS NULL OR assignee_id=$2 OR NOT EXISTS(SELECT 1 FROM active_members WHERE id=inbound.assignee_id))',
+        [row.id, ctx.member.id]
+      );
+      if (!assigned.rowCount) throw new RequestError(409, 'Another member owns this reply.');
+      await record(ctx.db, ws, l.program_id, 'inbox.claimed', row.id, ctx.member.id);
+      return { assigned: true };
+    }
+    if (b.kind && ['hard_bounce', 'soft_bounce', 'complaint'].includes(row.kind) && b.kind !== row.kind)
+      throw new RequestError(409, 'Provider delivery feedback retains its original classification.');
     if (
       b.kind &&
-      !['reply', 'quote', 'interested', 'declined', 'opt_out', 'auto_reply'].includes(String(b.kind))
+      !['reply', 'quote', 'interested', 'declined', 'question', 'opt_out', 'auto_reply'].includes(
+        String(b.kind)
+      )
     )
       throw new RequestError(422, 'Invalid classification.');
     if (b.kind === 'opt_out') await suppress(ctx.db, ws, l.contact_key, 'opt_out');
@@ -329,7 +362,10 @@ export async function dispatchRoute(ctx: Context, url: URL, method: string, b: I
       'UPDATE inbound SET handled_at=coalesce(handled_at,now()),handler_id=coalesce(handler_id,$3),kind=coalesce($2,kind) WHERE id=$1',
       [row.id, b.kind ?? null, ctx.member.id]
     );
-    await record(ctx.db, ws, l.program_id, 'inbox.handled', row.id, ctx.member.id);
+    await record(ctx.db, ws, l.program_id, 'inbox.handled', row.id, ctx.member.id, {
+      before: row.kind,
+      after: b.kind ?? row.kind
+    });
     return { ok: true };
   }
   throw new RequestError(404, 'Resource not found.');

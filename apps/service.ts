@@ -1,3 +1,5 @@
+import { syncTick } from '../packages/outreach/mailbox-sync.ts';
+import { cleanup } from '../packages/outreach/retention.ts';
 import { loadExtensions } from '../packages/connectors/sdk.ts';
 import pg from 'pg';
 import { once } from 'node:events';
@@ -19,6 +21,11 @@ if (
   (!['localhost', '127.0.0.1', '[::1]'].includes(origin.hostname) && origin.protocol !== 'https:')
 )
   throw new Error('Set a public HTTPS origin or a loopback origin.');
+if (process.env.MAILOOP_SEND_ENABLED === 'true' && origin.protocol !== 'https:')
+  throw new Error('Real delivery requires a public HTTPS unsubscribe origin.');
+const orgCap = Number(process.env.MAILOOP_ORG_DAILY_CAP ?? 500);
+if (!Number.isSafeInteger(orgCap) || orgCap < 1)
+  throw new Error('Set a positive organization daily cap.');
 const pool = new pg.Pool({ connectionString: url, max: 12 }),
   settings = {
     vault: new Vault(Buffer.from(key, 'base64')),
@@ -38,11 +45,16 @@ try {
   } = await pool.query('SELECT rolsuper,rolbypassrls FROM pg_roles WHERE rolname=current_user');
   if (role.rolsuper || role.rolbypassrls) throw new Error('Use the dedicated runtime database login.');
   if (process.argv[2] === 'worker') {
+    let nextCleanup = 0;
     while (!stopping) {
       const workspaces = (await pool.query('SELECT id FROM mailoop.workspaces ORDER BY id')).rows;
+      const clean = Date.now() >= nextCleanup;
+      if (clean) nextCleanup = Date.now() + 3600000;
       for (const { id } of workspaces) {
         try {
+          if (clean) await cleanup(pool, id, settings.vault);
           await deliveryTick(pool, id, settings.vault, settings.base, settings.allowReal);
+          await syncTick(pool, id, settings.vault);
           await researchTick(pool, id, settings.vault, settings.base);
         } catch (e) {
           console.error('Workspace task failed', e instanceof Error ? e.name : 'Error');

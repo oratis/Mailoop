@@ -77,6 +77,8 @@ export async function receiveEvent(
     });
     const event: InboundMail = {
       sourceId: eventId,
+      rfcMessageId:
+        typeof b.rfcMessageId === 'string' ? field(b.rfcMessageId, 'message ID', 400) : undefined,
       from,
       references: refs,
       at: received.toISOString(),

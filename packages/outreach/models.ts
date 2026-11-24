@@ -1,3 +1,4 @@
+import { rates } from './metering.ts';
 import { RequestError } from '../db/database.ts';
 import { type Context, type Input, requireRole } from './context.ts';
 import { field } from './security.ts';
@@ -12,8 +13,15 @@ export async function bindModel(ctx: Context, b: Input) {
   const {
     rows: [binding]
   } = await ctx.db.query(
-    'INSERT INTO bindings(workspace_id,owner_id,provider,model,secret) VALUES($1,$2,$3,$4,$5) RETURNING id,provider,model,active',
-    [ctx.member.workspaceId, ctx.member.id, provider, model, ctx.vault.seal(ctx.member.workspaceId, key)]
+    'INSERT INTO bindings(workspace_id,owner_id,provider,model,secret,rates) VALUES($1,$2,$3,$4,$5,$6) RETURNING id,provider,model,active',
+    [
+      ctx.member.workspaceId,
+      ctx.member.id,
+      provider,
+      model,
+      ctx.vault.seal(ctx.member.workspaceId, key),
+      rates(b.rates)
+    ]
   );
   return binding;
 }

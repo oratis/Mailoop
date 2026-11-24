@@ -1,6 +1,10 @@
 import type { Artifact } from './imports.ts';
 import type { Source } from './sources.ts';
 
+const businessContext = (text: string, address: string) =>
+  /partnership|business (?:inquir|contact)|collaborat|商务|商務|合作|コラボ|提携|협업|geschäftlich/i.test(
+    text.replaceAll(address, '')
+  );
 // The citation comes from the page actually fetched, even if the model proposed
 // a profile URL or paraphrased the source. Ambiguous evidence stays in review.
 export function verifyEvidence(a: Artifact, sources: Source[]): Artifact {
@@ -13,15 +17,14 @@ export function verifyEvidence(a: Artifact, sources: Source[]): Artifact {
           const index = s.text.indexOf(contact.address);
           if (index < 0) return [];
           const exact = contact.evidenceExcerpt ?? '';
-          if (exact.includes(contact.address) && s.text.includes(exact))
+          if (
+            exact.includes(contact.address) &&
+            s.text.includes(exact) &&
+            businessContext(exact, contact.address)
+          )
             return [{ source: s, excerpt: exact }];
           const excerpt = s.text.slice(Math.max(0, index - 130), index + contact.address.length + 110);
-          if (
-            !/partnership|business inquir|collaborat|合作|商务|コラボ|お問い合わせ|提携|협업|geschäftlich/i.test(
-              excerpt
-            )
-          )
-            return [];
+          if (!businessContext(excerpt, contact.address)) return [];
           return [{ source: s, excerpt }];
         });
         const cited =

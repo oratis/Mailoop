@@ -14,6 +14,7 @@ Mailoop 面向由多名成员共同维护创作者关系的团队。这套文档
 | 不同 AI 怎么运行同一个 skill？ | [Agent、模型与 skills](engineering/agents-and-skills.md) | 实现工具权限、模型授权与研究结果校验 |
 | 如何组织几十个独立授权的邮箱？ | [邮箱 connectors](engineering/connectors.md) | 实现授权、线程归属、排程和撤权 |
 | 各模块之间传递什么？ | [数据与 API](engineering/contracts.md) · [研究结果样例](examples/research-result.json) | 实现 schema、事务、接口与事件消费者 |
+| 当前实测了哪些环节？ | [实现与验收](operations/acceptance.md) | 复现研究、浏览器走查、邮件协议和容量实验 |
 | 第一个迭代做什么，什么算完成？ | [开发计划](engineering/delivery.md) | 安排工程分工、测试、部署和试点 |
 
 公开资料的核对日期为 **2026-11-24**。可复核的项目代码尽量固定到具体提交。更新厂商授权、邮箱能力或指标定义时，同一个 PR 应同时修订依赖它的验收场景。

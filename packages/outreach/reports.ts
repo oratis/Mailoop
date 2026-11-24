@@ -93,6 +93,15 @@ export async function report(
       params
     )
   ).rows;
+  const usageCosts =
+    !owner && !mailbox && !template && (!region || region === p.region)
+      ? (
+          await ctx.db.query(
+            `SELECT kind,provider,currency,count(*)::int AS requests,count(*) FILTER(WHERE amount IS NULL)::int AS unpriced,sum(amount)::text AS estimated_amount FROM usage_facts WHERE program_id=$1 AND at >= $2 AND at<$3 GROUP BY kind,provider,currency ORDER BY kind,provider,currency`,
+            [campaign, start, end]
+          )
+        ).rows
+      : [];
   const rate = (n: number, d = cohort.length) => ({
     numerator: n,
     denominator: d,
@@ -130,7 +139,7 @@ export async function report(
     await ctx.db.query(
       scope +
         `SELECT count(*)::int AS assessed,count(*) FILTER(WHERE p.shortlisted)::int AS shortlisted,
-    count(*) FILTER(WHERE p.shortlisted AND p.evidence_ok AND EXISTS(SELECT 1 FROM consents k WHERE k.contact_key=p.contact_key AND k.region=c.region AND k.purpose=c.purpose AND k.expires_at>now())
+    count(*) FILTER(WHERE p.shortlisted AND p.evidence_ok AND p.evidence_until>now() AND EXISTS(SELECT 1 FROM consents k WHERE k.contact_key=p.contact_key AND k.region=c.region AND k.purpose=c.purpose AND k.expires_at>now())
     AND NOT EXISTS(SELECT 1 FROM suppressions s WHERE s.contact_key=p.contact_key))::int AS eligible
     FROM prospects p JOIN programs c ON c.id=p.program_id WHERE c.id=$1 AND ($7::text IS NULL OR c.region=$7)
     AND (($4::uuid IS NULL AND $5::uuid IS NULL AND $6::text IS NULL) OR EXISTS(SELECT 1 FROM visible_letters l WHERE l.prospect_id=p.id))`,
@@ -140,6 +149,7 @@ export async function report(
   const wins = cohort.filter((x) => x.won).length;
   const aggregateOnly = ['viewer', 'analyst'].includes(ctx.member.role);
   return {
+    usageCosts,
     daily,
     handlingSeconds: handling,
     shortlist: rate(audience.shortlisted, audience.assessed),

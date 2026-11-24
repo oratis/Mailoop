@@ -18,6 +18,10 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm test
+      - run: npx playwright install --with-deps chromium
+      - run: node --import tsx scripts/browser-check.ts
+      - run: bash scripts/check-mail.sh
+      - run: node --import tsx scripts/capacity.ts
   self-host:
     runs-on: ubuntu-latest
     timeout-minutes: 15

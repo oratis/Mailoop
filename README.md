@@ -4,7 +4,7 @@
 
 Mailoop is a self-hosted, open-source AI agent framework for email outreach. A creator partnerships team can describe who it wants to reach, review the evidence for each business contact, and run a campaign from mailboxes its members have connected. Replies return to the teammate who owns the conversation.
 
-**Project status · Developer preview.** The workspace includes three model providers, local coding-agent skills, member-owned mailbox connectors, revision approval, a reconciled outbox, an inbox and cohort reports. The provider matrix records the available tests and external release gates. [Operator guide](docs/operations/self-host.md)
+**Project status · Developer preview.** The workspace includes three model providers, local coding-agent skills, member-owned mailbox connectors, revision approval, a reconciled outbox, an inbox and cohort reports. The provider matrix records the available tests and external release gates. [Operator guide](docs/operations/self-host.md) · [Validation results](docs/operations/acceptance.md)
 
 ## Run a persistent workspace
 

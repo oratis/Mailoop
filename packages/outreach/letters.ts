@@ -1,11 +1,21 @@
+import { recordUsage } from './metering.ts';
 import type { PoolClient } from 'pg';
 import { RequestError } from '../db/database.ts';
 import { type Context, type Input, lockWorkspace, program, record, requireRole } from './context.ts';
 import { type Candidate, prospect } from './imports.ts';
 import { address, field, id, instant } from './security.ts';
 import { generate } from './models.ts';
-import { messageId } from './mail-transports.ts';
-export type LetterBody = { from: string; to: string; subject: string; body: string; parent?: string };
+import { createHash } from 'node:crypto';
+import { messageId, mime } from './mail-transports.ts';
+export type LetterBody = {
+  from: string;
+  to: string;
+  subject: string;
+  body: string;
+  parent?: string;
+  references?: string[];
+  parentReceipt?: string;
+};
 export async function letter(ctx: Context, letterId: string) {
   const l = (
     await ctx.db.query(
@@ -74,13 +84,44 @@ export async function makeDraft(ctx: Context, prospectId: string, b: Input) {
         step
       })
     );
+    const invocation = (
+      await ctx.db.query(
+        "INSERT INTO usage_facts(workspace_id,program_id,id,kind,provider,rates) VALUES($1,$2,gen_random_uuid(),'compose',$3,$4) RETURNING id",
+        [ctx.member.workspaceId, p.id, binding.provider, binding.rates]
+      )
+    ).rows[0].id;
+    await recordUsage(ctx.db, ctx.member.workspaceId, invocation, out.usage, binding.rates);
     content = validateContent(out.value?.subject, out.value?.body);
   } else content = validateContent(b.subject, b.body);
+  let thread: Pick<LetterBody, 'parent' | 'references' | 'parentReceipt'> = {};
+  if (parent) {
+    const anchor = messageId(parent.id, from),
+      original = ctx.vault.open<LetterBody>(ctx.member.workspaceId, parent.sealed);
+    thread = { parent: anchor, references: [anchor], parentReceipt: parent.receipt };
+    if (step === 'reply') {
+      const inbound = (
+        await ctx.db.query(
+          "SELECT sealed FROM inbound WHERE letter_id=$1 AND kind NOT IN ('hard_bounce','soft_bounce','complaint','auto_reply') ORDER BY received_at DESC LIMIT 1",
+          [parent.id]
+        )
+      ).rows[0];
+      if (!inbound) throw new RequestError(409, 'No human reply in this thread.');
+      const ref = ctx.vault.open<{ rfcMessageId?: string }>(
+        ctx.member.workspaceId,
+        inbound.sealed
+      ).rfcMessageId;
+      if (ref && /^<[^<>\s]+@[^<>\s]+>$/.test(ref)) {
+        thread.parent = ref;
+        thread.references = [anchor, ref];
+      }
+    }
+    content.subject = /^re:/i.test(original.subject) ? original.subject : 'Re: ' + original.subject;
+  }
   const body: LetterBody = {
     ...content,
     from,
     to: address(contact.address),
-    ...(parent && { parent: messageId(parent.id, from) })
+    ...thread
   };
   const {
     rows: [l]
@@ -107,6 +148,10 @@ export async function editDraft(ctx: Context, letterId: string, b: Input) {
   const l = await letter(ctx, letterId);
   if (l.revision !== b.revision || !['draft', 'held', 'scheduled'].includes(l.status))
     throw new RequestError(412, 'Review the current message revision.');
+  await ctx.db.query(
+    'INSERT INTO draft_history(workspace_id,letter_id,revision,sealed) VALUES($1,$2,$3,$4)',
+    [ctx.member.workspaceId, l.id, l.revision, l.sealed]
+  );
   const content = {
     ...ctx.vault.open<LetterBody>(ctx.member.workspaceId, l.sealed),
     ...validateContent(b.subject, b.body)
@@ -114,7 +159,7 @@ export async function editDraft(ctx: Context, letterId: string, b: Input) {
   const {
     rows: [updated]
   } = await ctx.db.query(
-    "UPDATE letters SET sealed=$2,revision=gen_random_uuid(),approved_by=NULL,status='draft',reason=NULL WHERE id=$1 RETURNING id,status,revision",
+    "UPDATE letters SET sealed=$2,revision=gen_random_uuid(),approved_mime=NULL,approved_digest=NULL,approved_by=NULL,status='draft',reason=NULL WHERE id=$1 RETURNING id,status,revision",
     [l.id, ctx.vault.seal(ctx.member.workspaceId, content)]
   );
   await record(
@@ -131,8 +176,8 @@ export async function gates(db: PoolClient, letterId: string) {
   const {
     rows: [v]
   } = await db.query(
-    `SELECT l.*,r.contact_key,r.evidence_ok,r.shortlisted,r.program_id,p.status AS campaign_state,p.facts,p.version AS current_program_version,
-    p.cap AS campaign_cap,p.timezone,p.window_start,p.window_end,m.cap AS mailbox_cap,m.provider,m.version AS current_mailbox_version,m.active,
+    `SELECT l.*,r.contact_key,(r.evidence_ok AND r.evidence_until>now()) AS evidence_ok,r.shortlisted,r.program_id,p.status AS campaign_state,p.facts,p.version AS current_program_version,
+    p.cap AS campaign_cap,p.timezone,p.window_start,p.window_end,m.cap AS mailbox_cap,m.sync_error,m.provider,m.version AS current_mailbox_version,m.active,
     EXISTS(SELECT 1 FROM active_members a WHERE a.id=m.owner_id) AS owner_active,
     EXISTS(SELECT 1 FROM active_members a WHERE a.id=l.approved_by AND a.role IN ('reviewer','admin') AND (a.role='admin' OR p.owner_id=a.id OR EXISTS(SELECT 1 FROM program_members pm WHERE pm.program_id=p.id AND pm.member_id=a.id))) AS reviewer_active,
     EXISTS(SELECT 1 FROM delegations d WHERE d.mailbox_id=m.id AND d.program_id=p.id AND d.expires_at>now()) AS delegated,
@@ -162,7 +207,7 @@ export async function gates(db: PoolClient, letterId: string) {
     reason = 'fact_expired';
   else if (v.step === 'first' && v.cooldown) reason = 'contact_cooldown';
   else if (v.step === 'followup' && v.inbound_seen) reason = 'reply_received';
-  else if (v.step === 'followup' && !v.recently_checked) reason = 'sync_required';
+  else if (v.step === 'followup' && (!v.recently_checked || v.sync_error)) reason = 'sync_required';
   else if (v.step === 'reply' && !v.inbound_seen) reason = 'no_inbound_thread';
   return { row: v, reason };
 }
@@ -186,18 +231,34 @@ export async function approveBatch(ctx: Context, campaign: string, b: Input) {
     if (l.status === 'held')
       await ctx.db.query('UPDATE letters SET approved_by=NULL WHERE id=$1', [l.id]);
     const { row, reason } = await gates(ctx.db, l.id);
-    if (reason) throw new RequestError(409, reason);
+    if (reason && reason !== 'sync_required') throw new RequestError(409, reason);
+    const ws = ctx.member.workspaceId,
+      body = ctx.vault.open<LetterBody>(ws, l.sealed);
+    const envelope = {
+      ...body,
+      id: l.id,
+      unsubscribe:
+        ctx.base + '/unsubscribe/' + ctx.vault.token('unsubscribe', ws + '/' + row.contact_key)
+    };
+    const raw = await mime(envelope),
+      digest = createHash('sha256').update(raw).digest('hex');
     await ctx.db.query(
-      `UPDATE letters SET approved_by=$2,program_version=$3,mailbox_version=$4,due_at=$5,status='scheduled',reason=NULL WHERE id=$1`,
+      `UPDATE letters SET approved_mime=$6,approved_digest=$7,approved_by=$2,program_version=$3,mailbox_version=$4,due_at=$5,status='scheduled',reason=NULL WHERE id=$1`,
       [
         l.id,
         ctx.member.id,
         row.current_program_version,
         row.current_mailbox_version,
-        item.dueAt ? instant(item.dueAt) : new Date()
+        item.dueAt ? instant(item.dueAt) : new Date(),
+        ctx.vault.seal(ws, { unsubscribe: envelope.unsubscribe, raw: raw.toString('base64') }),
+        digest
       ]
     );
-    await record(ctx.db, ctx.member.workspaceId, campaign, 'approval.granted', l.id, ctx.member.id);
+    await record(ctx.db, ctx.member.workspaceId, campaign, 'approval.granted', l.id, ctx.member.id, {
+      revision: l.revision,
+      digest,
+      mailboxId: l.mailbox_id
+    });
     result.push(l.id);
   }
   return { ids: result };

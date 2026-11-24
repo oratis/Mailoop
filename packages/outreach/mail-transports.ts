@@ -12,10 +12,13 @@ export type Envelope = {
   body: string;
   unsubscribe: string;
   parent?: string;
+  references?: string[];
+  parentReceipt?: string;
 };
 export type MailAccount = { provider: string; token?: string; basic?: BasicMailbox; email: string };
 export type InboundMail = {
   sourceId: string;
+  rfcMessageId?: string;
   from: string;
   text: string;
   references: string[];
@@ -61,7 +64,11 @@ export async function verifyBasic(b: BasicMailbox) {
   }
 }
 export async function mime(e: Envelope) {
-  if ([e.from, e.to, e.subject, e.parent ?? '', e.unsubscribe].some((v) => /[\r\n]/.test(v)))
+  if (
+    [e.from, e.to, e.subject, e.parent ?? '', ...(e.references ?? []), e.unsubscribe].some((v) =>
+      /[\r\n]/.test(v)
+    )
+  )
     throw new RequestError(422, 'Invalid mail header.');
   const { message } = await nodemailer
     .createTransport({ streamTransport: true, buffer: true, newline: 'windows' })
@@ -72,7 +79,7 @@ export async function mime(e: Envelope) {
       text: e.body + '\n\nUnsubscribe: ' + e.unsubscribe,
       messageId: messageId(e.id, e.from),
       inReplyTo: e.parent,
-      references: e.parent,
+      references: e.references ?? e.parent,
       headers: {
         'List-Unsubscribe': '<' + e.unsubscribe + '>',
         'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click'
@@ -89,9 +96,9 @@ function confirmed(value: unknown) {
   if (typeof value !== 'string' || !value.trim()) throw new Error('Missing provider receipt.');
   return value;
 }
-export async function submitMail(m: MailAccount, e: Envelope) {
+export async function submitMail(m: MailAccount, e: Envelope, approved?: Buffer) {
   if (m.provider === 'simulated') return 'sim-' + e.id;
-  const raw = await mime(e),
+  const raw = approved ?? (await mime(e)),
     token = m.token!;
   if (m.provider === 'nylas') {
     const form = new FormData();
@@ -102,10 +109,26 @@ export async function submitMail(m: MailAccount, e: Envelope) {
     });
     return confirmed(receipt.data?.id);
   }
-  if (m.provider === 'gmail')
+  if (m.provider === 'gmail') {
+    let threadId: string | undefined;
+    if (e.parentReceipt) {
+      const parent = await remoteJSON(
+        gmail + '/messages/' + encodeURIComponent(e.parentReceipt) + '?format=minimal',
+        token
+      );
+      if (!parent.threadId) throw new RequestError(422, 'Original Gmail thread unavailable.');
+      threadId = parent.threadId;
+    }
     return confirmed(
-      (await remoteJSON(gmail + '/messages/send', token, post({ raw: raw.toString('base64url') }))).id
+      (
+        await remoteJSON(
+          gmail + '/messages/send',
+          token,
+          post({ raw: raw.toString('base64url'), threadId })
+        )
+      ).id
     );
+  }
   if (m.provider === 'feishu') {
     const d = await remoteJSON(feishu + '/drafts', token, post({ raw: raw.toString('base64url') }));
     const did = d.data?.draft?.id;
@@ -238,6 +261,7 @@ export async function readRelated(
       if (refs.includes(mid))
         result.push({
           sourceId: key,
+          rfcMessageId: h['message-id'],
           from: v.from?.[0]?.email ?? '',
           text: v.snippet ?? '',
           at: new Date(v.date * 1000).toISOString(),
@@ -263,6 +287,7 @@ export async function readRelated(
         item.payload;
       result.push({
         sourceId: item.id,
+        rfcMessageId: h['message-id'],
         from: emailFrom(h.from ?? ''),
         text: Buffer.from(part?.body?.data ?? '', 'base64url')
           .toString()
@@ -293,6 +318,7 @@ export async function readRelated(
         if (refs.includes(mid))
           result.push({
             sourceId: item.id,
+            rfcMessageId: h['message-id'],
             from: item.from?.emailAddress?.address ?? '',
             text: item.bodyPreview ?? '',
             references: refs,
@@ -328,6 +354,7 @@ export async function readRelated(
           );
           if (refs.includes(mid))
             result.push({
+              rfcMessageId: parsed.messageId,
               sourceId:
                 parsed.messageId ?? String(item.uid) + '/' + String(c.mailbox && c.mailbox.uidValidity),
               from: parsed.from?.value[0]?.address ?? '',
@@ -381,6 +408,7 @@ export async function readRelated(
         ).data?.message;
         result.push({
           sourceId: row.id,
+          rfcMessageId: d.smtp_message_id,
           from: d.head_from?.mail_address ?? '',
           text: Buffer.from(full?.body_plain_text ?? '', 'base64url')
             .toString()

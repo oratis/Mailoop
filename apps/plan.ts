@@ -243,6 +243,7 @@ async function main() {
           role: 'user',
           content: JSON.stringify({
             brief: claim.brief,
+            criteria: claim.criteria,
             runId,
             briefRevision: claim.briefRevision,
             schema: claim.schema,

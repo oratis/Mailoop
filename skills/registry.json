@@ -1,0 +1,8 @@
+{
+  "mailoop-brief": {"tools":["campaign.read","campaign.write"],"writes":"campaign brief","input":"audience and approved facts","output":"campaign revision"},
+  "mailoop-research": {"tools":["campaign.read","search.public","source.read","research.preview"],"writes":"import preview","input":"campaign brief and source budget","output":"research-result.v1"},
+  "mailoop-compose":{"tools":["campaign.read","creator.read","draft.write"],"writes":"draft revision","input":"engagement and sender identity","output":"draft and revision"},
+  "mailoop-schedule":{"tools":["campaign.read","draft.read","approval.submit"],"writes":"reviewer-authorized queue entry","input":"selected draft revisions and due time","output":"approved IDs"},
+  "mailoop-triage":{"tools":["inbox.read","inbox.handle","draft.write"],"writes":"reply disposition or draft","input":"authorized inbox items","output":"classification and optional draft"},
+  "mailoop-report":{"tools":["report.read"],"writes":"none","input":"campaign cohort and filters","output":"aggregates by currency and period"}
+}

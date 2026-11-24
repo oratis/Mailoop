@@ -201,3 +201,32 @@ test('source checks ground a misattributed citation, withhold invented contact d
     '{}'
   );
 });
+test('history and delta checkpoint only after headers were read and preserve paging state', async (t) => {
+  const { changedThreads } = await import('../packages/outreach/mailbox-sync.ts');
+  const mock = t.mock.method(globalThis, 'fetch', async (input: unknown) => {
+    const u = new URL(String(input));
+    if (u.pathname.endsWith('/profile')) return json({ historyId: '40' });
+    if (u.pathname.endsWith('/history'))
+      return json({
+        historyId: '49',
+        history: [{ messagesAdded: [{ message: { id: 'reply' } }] }],
+        nextPageToken: 'next'
+      });
+    if (u.pathname.includes('/delta'))
+      return json({
+        value: [{ internetMessageHeaders: [{ name: 'References', value: rfc }] }],
+        '@odata.deltaLink': 'https://graph.microsoft.com/v1.0/delta?next=2'
+      });
+    return json({ payload: { headers: [{ name: 'In-Reply-To', value: rfc }] } });
+  });
+  const gmail = { email: sender, provider: 'gmail', token: 'test' };
+  assert.deepEqual((await changedThreads(gmail, {})).cursor, { history: '40' });
+  const page = await changedThreads(gmail, { history: '40' });
+  assert.deepEqual(page.cursor, { history: '40', page: 'next' });
+  assert.deepEqual([...page.refs], [mail.id]);
+  const graph = await changedThreads({ ...gmail, provider: 'graph' }, {});
+  assert.deepEqual([...graph.refs], [mail.id]);
+  assert.equal(graph.more, false);
+  mock.mock.mockImplementation(async () => new Response(null, { status: 410 }));
+  await assert.rejects(changedThreads({ ...gmail, provider: 'graph' }, graph.cursor), /410/);
+});

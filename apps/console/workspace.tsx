@@ -37,12 +37,27 @@ type Box = {
 };
 type Binding = { id: string; provider: string; model: string; active: boolean };
 type Preview = { previewId: string; digest: string; decisions: string[] };
-type Reply = { id: string; letter_id: string; kind: string; text: string; handled_at?: string };
+type Reply = {
+  id: string;
+  letter_id: string;
+  kind: string;
+  text: string;
+  handled_at?: string;
+  assignee_id?: string;
+};
 type Run = { id: string; status: string; step: string; calls: number; budget: number; note?: string };
 type Metric = { numerator: number; denominator: number; rate: number | null };
 type Summary = {
   cohort: { id: string; replied: boolean; interested: boolean; first_reply_ids: string[] }[];
   observing: boolean;
+  usageCosts: {
+    kind: string;
+    provider: string;
+    currency: string | null;
+    requests: number;
+    unpriced: number;
+    estimated_amount: string | null;
+  }[];
   daily: { day: string; kind: string; count: number }[];
   handlingSeconds: { p50: number | null; p90: number | null; overdue: number };
   shortlist: Metric;
@@ -423,6 +438,9 @@ function App() {
                         bindingId: d.bindingId,
                         urls: d.urls.split(/[\s,]+/).filter(Boolean),
                         budget: Number(d.budget),
+                        language: d.language,
+                        publishedAfter: d.publishedAfter,
+                        maxCandidates: Number(d.maxCandidates),
                         requestKey: crypto.randomUUID()
                       })
                     }
@@ -430,10 +448,13 @@ function App() {
                     <Select name="bindingId" label="Model binding" options={knownBindings} />
                     <Input
                       name="urls"
-                      label="Public source URLs (leave empty for Brave Search)"
+                      label="Public source URLs (leave empty to use configured search)"
                       optional
                       type="textarea"
                     />
+                    <Input name="language" label="Required language code" optional />
+                    <Input name="publishedAfter" label="Earliest work date" type="date" optional />
+                    <Input name="maxCandidates" label="Maximum candidates" type="number" value="100" />
                     <Input name="budget" label="Maximum paid calls" type="number" value="2" />
                   </Form>
                   {detail?.runs.map((r) => (
@@ -520,6 +541,20 @@ function App() {
             {p && tab === 'Creators' && (
               <section>
                 <h2>Creator records</h2>
+                {detail?.summary.cohort.some((c) => c.interested) && (
+                  <details>
+                    <summary>Interested creators</summary>
+                    <ul>
+                      {detail.summary.cohort
+                        .filter((c) => c.interested)
+                        .map((c) => (
+                          <li key={c.id}>
+                            {detail.prospects.find((row) => row.id === c.id)?.displayName ?? c.id}
+                          </li>
+                        ))}
+                    </ul>
+                  </details>
+                )}
                 {!detail?.prospects.length && <p>Import research to build a shortlist.</p>}
                 {detail?.prospects.map((c) => (
                   <details key={c.id}>
@@ -533,6 +568,35 @@ function App() {
                         {pt.address} · {pt.source} · {pt.evidenceUrl ?? pt.recordRef}
                       </p>
                     ))}
+                    {operate && c.contacts.length > 1 && (
+                      <Form
+                        label="Select contact"
+                        run={(d) => modify('creators/' + c.id + '/contact', { index: Number(d.index) })}
+                      >
+                        <Select
+                          name="index"
+                          label="Business contact"
+                          options={c.contacts.map((v, i) => [String(i), v.address])}
+                        />
+                      </Form>
+                    )}
+                    {reviewer && detail.prospects.length > 1 && (
+                      <details>
+                        <summary>Merge another channel</summary>
+                        <Form
+                          label="Confirm same creator"
+                          run={(d) => modify('creators/' + c.id + '/merge', d)}
+                        >
+                          <Select
+                            name="duplicateId"
+                            label="Duplicate creator"
+                            options={detail.prospects
+                              .filter((v) => v.id !== c.id)
+                              .map((v) => [v.id, v.displayName])}
+                          />
+                        </Form>
+                      </details>
+                    )}
                     {operate && (
                       <Form
                         label={c.shortlisted ? 'Remove from shortlist' : 'Shortlist creator'}
@@ -612,6 +676,7 @@ function App() {
                       {l.from} → {l.to}
                     </p>
                     <pre>{l.body}</pre>
+                    <p>Each approved message includes the workspace unsubscribe link.</p>
                     {reviewer && ['draft', 'held'].includes(l.status) && (
                       <label className="check">
                         <input
@@ -695,6 +760,19 @@ function App() {
                       {i.kind} · {i.handled_at ? 'Handled' : 'Needs attention'}
                     </summary>
                     <pre>{i.text}</pre>
+                    {i.assignee_id ? (
+                      <p>
+                        Assigned to{' '}
+                        {members.find((m) => m.id === i.assignee_id)?.name ?? 'a team member'}
+                      </p>
+                    ) : (
+                      <Form
+                        label="Claim conversation"
+                        run={() => modify('inbox/' + i.id, { action: 'claim' })}
+                      >
+                        <></>
+                      </Form>
+                    )}
                     <Form label="Mark handled" run={(d) => modify('inbox/' + i.id, d)}>
                       <Select
                         name="kind"
@@ -704,6 +782,7 @@ function App() {
                           'quote',
                           'interested',
                           'declined',
+                          'question',
                           'auto_reply',
                           'opt_out'
                         ].map((v) => [v, v])}
@@ -790,6 +869,16 @@ function App() {
                   Export aggregate JSON
                 </button>
                 {summary.observing && <p>The 14-day observation window is still open.</p>}
+                <h3>Model and search usage</h3>
+                <ul>
+                  {summary.usageCosts.map((x, i) => (
+                    <li key={i}>
+                      {x.provider} · {x.kind} · {x.requests} requests ·{' '}
+                      {x.estimated_amount === null ? 'unpriced' : x.estimated_amount + ' ' + x.currency}{' '}
+                      · {x.unpriced} without a price
+                    </li>
+                  ))}
+                </ul>
                 <h3>Daily activity</h3>
                 <ul>
                   {summary.daily.map((row) => (

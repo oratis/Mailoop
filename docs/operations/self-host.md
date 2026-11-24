@@ -53,3 +53,11 @@ OAuth 回调统一为公开服务地址加 /oauth/PROVIDER/callback，分别登�
 使用 pg_dump -Fc 对数据库做一致性备份，将主加密密钥单独保管。服务升级先停止 worker，备份，再执行 docker compose run --rm migrate 和 docker compose up -d --build。版本化迁移持有数据库锁。将备份恢复到独立数据库，使用原主密钥核对成员身份、活动数、抑制与投递记录。在开启外发前，补齐备份点之后的撤权、退订和已被服务商受理的事实；无法确定的提交留在 unknown。CI 在全新 Compose 部署创建活动、重启 Web，并将备份恢复到第二个数据库核对活动 ID。
 
 用户付费、外部账号资格、服务商审核和多组织试点分别跟踪。上述合同测试使用合成数据和服务协议应答。真实 OAuth 测试使用租户专用账号，记录接收端 Message-ID、退订头和同线程回复后更新支持等级。 [里程碑验收条件](../engineering/delivery.md)
+
+## 审计、数据管理与接口发现
+
+访问本实例的 /openapi.json 获取 OpenAPI 3.1 描述，/schemas/research-result.json 返回研究导入 schema。运行 npm run cli -- watch campaigns CAMPAIGN_ID 0，可订阅活动事件并使用最后读到的序号恢复。在 /v1/outreach/skills 查看各 skill 的内容摘要、工具清单、副作用与输入输出约定。
+
+管理员可通过 POST policy 设置 retentionDays，定期清理未应用的研究预演、已应用批次中的原始快照、过期的历史草稿、未匹配信封和已超期的匹配来信正文。默认由管理员选择保留期限。DELETE creators/ID 将该活动档案、关联草稿及来信正文脱敏，撤销对应联系许可并保留拒联键。已提交而待对账的外部请求保留投递标识。其他活动中的独立档案、外部服务商和已有离线备份各自执行相应的数据保留策略。
+
+GET creators/ID/relationships 返回成员有权查看的同渠道活动。POST creators/ID/merge 由审核员显式确认 duplicateId；已有外联历史的重复档案保留独立记录。POST creators/ID/contact 接受候选的联系点 index，变动后取消原待发草稿并要求重新核验。已提交会话保持原发件人与收件人。 [实现与验收](acceptance.md)

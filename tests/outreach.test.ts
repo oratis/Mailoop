@@ -235,3 +235,66 @@ test('external adapters use bounded public sources and construct valid unsubscri
   assert.equal(msg.messageId, messageId('abc', 'operator@brand.example'));
   assert.ok(raw.toString().includes('List-Unsubscribe-Post: List-Unsubscribe=One-Click'));
 });
+test('changing the contact invalidates drafts, channel merge is explicit, and erasure clears evidence and history', async () => {
+  const { owner, api, route, p } = await setup(),
+    first = candidate(22),
+    second = candidate(23);
+  first.contacts.push({
+    ...first.contacts[0],
+    address: 'agency@artist.example',
+    evidenceExcerpt: 'Business inquiries: agency@artist.example'
+  });
+  const a = {
+    schemaVersion: 1,
+    runId: 'multi-channel',
+    briefRevision: '1',
+    researchedAt: new Date().toISOString(),
+    candidates: [first, second]
+  };
+  await api(route + '/apply', await api(route + '/preview', a));
+  const rows = (await api(route)).prospects,
+    creator = rows.find((c: { displayName: string }) => c.displayName === first.displayName),
+    other = rows.find((c: { id: string }) => c.id !== creator.id);
+  await api('creators/' + creator.id + '/merge', { duplicateId: other.id });
+  assert.equal((await api(route)).prospects.length, 1);
+  assert.deepEqual((await api(route + '/preview', { ...a, runId: 'check-alias' })).decisions, [
+    'duplicate',
+    'duplicate'
+  ]);
+  const box = await api('mailboxes', { provider: 'simulated', address: 'review@brand.example' });
+  await api('mailboxes/' + box.id + '/grant', { campaignId: p.id, expiresAt: future() });
+  const endpoint = 'creators/' + creator.id;
+  await api(endpoint + '/permission', {
+    confirmed: true,
+    proof: 'Synthetic proof',
+    expiresAt: future()
+  });
+  const l = await api(endpoint + '/drafts', { mailboxId: box.id, subject: 'First', body: 'Draft' });
+  const edited = await api(
+    'letters/' + l.id,
+    { revision: l.revision, subject: 'Second', body: 'Edited' },
+    200,
+    'PATCH'
+  );
+  assert.equal((await api('letters/' + l.id + '/history'))[0].subject, 'First');
+  await api(route + '/approve', { items: [edited] });
+  const approved = (
+    await env.pool.query('SELECT approved_digest,approved_mime FROM mailoop.letters WHERE id=$1', [l.id])
+  ).rows[0];
+  assert.equal(approved.approved_digest.length, 64);
+  assert.ok(approved.approved_mime);
+  await api(endpoint + '/contact', { index: 1 });
+  assert.equal((await api(route)).letters[0].status, 'cancelled');
+  await api(endpoint, undefined, 200, 'DELETE');
+  assert.equal((await api(route)).prospects[0].displayName, 'Removed creator');
+  assert.deepEqual(await api('letters/' + l.id + '/history'), []);
+  assert.equal(
+    (
+      await env.pool.query(
+        "SELECT count(*)::int AS n FROM mailoop.imports WHERE workspace_id=$1 AND sealed<>''",
+        [owner.workspaceId]
+      )
+    ).rows[0].n,
+    0
+  );
+});

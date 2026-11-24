@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import { asWorkspace, RequestError } from '../db/database.ts';
 import { accessMailbox, MailboxError } from './mailbox-auth.ts';
@@ -21,6 +21,7 @@ function classify(text: string, automatic: boolean) {
   if (/not interested|婉拒|結構です/i.test(text)) return 'declined';
   if (/interested|let.s collaborate|有兴趣|興味があります/i.test(text)) return 'interested';
   if (/rate card|报价|見積|pricing/i.test(text)) return 'quote';
+  if (/[?？]/.test(text)) return 'question';
   return 'reply';
 }
 export async function ingest(
@@ -78,10 +79,21 @@ export async function deliveryTick(
       rows: [l]
     } =
       await db.query(`SELECT * FROM letters WHERE status IN ('scheduled','submitting','unknown','accepted')
-      AND due_at<=now() ORDER BY due_at,id LIMIT 1 FOR UPDATE SKIP LOCKED`);
+      AND due_at<=now() AND (status<>'accepted' OR NOT EXISTS(SELECT 1 FROM prospects p WHERE p.id=letters.prospect_id AND p.erased_at IS NOT NULL)) ORDER BY due_at,id LIMIT 1 FOR UPDATE SKIP LOCKED`);
     if (!l) return null;
     const { row, reason } = await gates(db, l.id);
     if (l.status === 'scheduled') {
+      if (reason === 'sync_required') {
+        await db.query(
+          "UPDATE letters SET due_at=LEAST(due_at,now()) WHERE id=$1 AND status='accepted'",
+          [l.parent_id]
+        );
+        await db.query(
+          "UPDATE letters SET due_at=now()+interval '2 minutes',reason='sync_required' WHERE id=$1",
+          [l.id]
+        );
+        return null;
+      }
       if (reason || (!allowReal && row.provider !== 'simulated')) {
         await db.query("UPDATE letters SET status='held',reason=$2 WHERE id=$1", [
           l.id,
@@ -164,11 +176,15 @@ export async function deliveryTick(
     } else if (l.status !== 'scheduled' && l.status !== 'accepted' && account.provider === 'simulated') {
       receipt = (await new SimulatedMailbox(pool).lookup(ws, l.id))?.receiptId;
     } else if (l.status === 'scheduled') {
-      receipt = await submitMail(account, {
-        ...draft,
-        id: l.id,
-        unsubscribe: base + '/unsubscribe/' + vault.token('unsubscribe', ws + '/' + contact)
-      });
+      const approved = vault.open<{ raw: string; unsubscribe: string }>(ws, l.approved_mime);
+      const raw = Buffer.from(approved.raw, 'base64');
+      if (createHash('sha256').update(raw).digest('hex') !== l.approved_digest)
+        throw new RequestError(422, 'Approval digest changed.');
+      receipt = await submitMail(
+        account,
+        { ...draft, id: l.id, unsubscribe: approved.unsubscribe },
+        raw
+      );
     } else if (l.status === 'accepted')
       related = await readRelated(account, { ...l, scanUntil }, draft.to);
     else receipt = await reconcileMail(account, l.id);

@@ -66,9 +66,12 @@ function channelKey(c: Candidate) {
 }
 async function decisions(ctx: Context, campaign: string, a: Artifact) {
   const seen = new Set<string>(
-    (await ctx.db.query('SELECT channel_key FROM prospects WHERE program_id=$1', [campaign])).rows.map(
-      (r) => r.channel_key
-    )
+    (
+      await ctx.db.query(
+        'SELECT channel_key FROM prospects WHERE program_id=$1 UNION SELECT channel_key FROM other_channels WHERE program_id=$1',
+        [campaign]
+      )
+    ).rows.map((r) => r.channel_key)
   );
   const keys = a.candidates
     .map((c) => c.contacts[0] && ctx.vault.hash(ctx.member.workspaceId, address(c.contacts[0].address)))
@@ -184,10 +187,14 @@ export async function attest(ctx: Context, prospectId: string, b: Input) {
       expires = instant(b.expiresAt);
     if (b.confirmed !== true || expires <= new Date())
       throw new RequestError(422, 'Confirm verified evidence and unexpired opt-in for this purpose.');
-    await ctx.db.query('UPDATE prospects SET evidence_ok=true,verified_by=$2 WHERE id=$1', [
-      r.id,
-      ctx.member.id
-    ]);
+    const evidenceUntil = b.evidenceExpiresAt
+      ? instant(b.evidenceExpiresAt)
+      : new Date(Date.now() + 90 * 86400000);
+    if (evidenceUntil <= new Date()) throw new RequestError(422, 'Review the expired source evidence.');
+    await ctx.db.query(
+      'UPDATE prospects SET evidence_ok=true,verified_by=$2,evidence_until=$3 WHERE id=$1',
+      [r.id, ctx.member.id, evidenceUntil]
+    );
     await ctx.db.query(
       `INSERT INTO consents(workspace_id,contact_key,purpose,region,sealed,expires_at,actor_id) VALUES($1,$2,$3,$4,$5,$6,$7)
       ON CONFLICT(workspace_id,contact_key,purpose,region) DO UPDATE SET sealed=excluded.sealed,expires_at=excluded.expires_at,actor_id=excluded.actor_id`,
