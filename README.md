@@ -4,7 +4,32 @@
 
 Mailoop is an open-source design for an AI agent framework for email outreach. A creator partnerships team can describe who it wants to reach, review the evidence for each business contact, and run a campaign from mailboxes its members have connected. Replies return to the teammate who owns the conversation.
 
-**Project status · Design stage.** This repository contains the product specification, architecture, integration contracts, and implementation plan. The first release milestone is a replayable campaign using a simulated mailbox. There is no installable runtime yet.
+**Project status · Local prototype.** The Console and CLI can review a synthetic research fixture, approve its draft, and follow it through a simulated mailbox to a reply. The broader workflow below is the product design. Real provider integrations are planned.
+
+## Run the prototype
+
+Use Node.js 22.12+ and npm under a regular user account. Installation downloads a platform-specific PostgreSQL binary. Each run starts a temporary database and a loopback HTTP server. Stopping the demo discards its data.
+
+```sh
+npm ci
+npm run demo
+```
+
+Open the **Coffee Studio** workspace URL printed in the terminal. Review the evidence, sender, recipient, and Japanese draft, then select **Approve simulated send**. Follow the accepted receipt and reply in **Activity**. Open the separate **Field Notes** workspace link to try the same flow in an empty organization. Both links grant local reviewer access for this run.
+
+To exercise recovery, start with `npm run demo -- --lose-receipt`. The simulated provider accepts the first send and drops the acknowledgement. The worker reconciles it using the original receipt. The activity history records the interruption.
+
+For the CLI, set `MAILOOP_URL` to the printed local origin and `MAILOOP_TOKEN` to the token from your own workspace URL. Create a sample and copy its returned `id` and `revision` into the shell variables `CAMPAIGN_ID` and `REVISION`.
+
+```sh
+npm run cli -- list
+npm run cli -- create "Coffee follow-up"
+npm run cli -- show "$CAMPAIGN_ID"
+npm run cli -- approve "$CAMPAIGN_ID" "$REVISION"
+npm run cli -- events "$CAMPAIGN_ID" 0
+```
+
+Use the sequence number of the last event in place of `0` to resume. `npm run build` type-checks the project and bundles the Console. `npm test` starts a separate PostgreSQL cluster for API, worker, isolation, and CLI integration tests.
 
 ## A campaign in practice
 

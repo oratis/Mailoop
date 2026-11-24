@@ -1,0 +1,31 @@
+{
+  "name": "mailoop",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "build": "tsc --noEmit && esbuild apps/console/main.tsx --bundle --minify --outdir=dist/console",
+    "predemo": "npm run build",
+    "demo": "tsx scripts/demo.ts",
+    "cli": "tsx apps/cli.ts",
+    "test": "tsx --test tests/*.test.ts"
+  },
+  "dependencies": {
+    "pg": "^8.23.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "@types/pg": "^8.23.1",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "embedded-postgres": "^18.7.0-beta.19",
+    "esbuild": "^0.28.2",
+    "tsx": "^4.23.15",
+    "typescript": "~5.9.3"
+  }
+}
