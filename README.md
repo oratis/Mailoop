@@ -2,9 +2,26 @@
 
 **make EDM great again**
 
-Mailoop is an open-source design for an AI agent framework for email outreach. A creator partnerships team can describe who it wants to reach, review the evidence for each business contact, and run a campaign from mailboxes its members have connected. Replies return to the teammate who owns the conversation.
+Mailoop is a self-hosted, open-source AI agent framework for email outreach. A creator partnerships team can describe who it wants to reach, review the evidence for each business contact, and run a campaign from mailboxes its members have connected. Replies return to the teammate who owns the conversation.
 
-**Project status · Local prototype.** The Console and CLI can review a synthetic research fixture, approve its draft, and follow it through a simulated mailbox to a reply. The broader workflow below is the product design. Real provider integrations are planned.
+**Project status · Developer preview.** The workspace includes three model providers, local coding-agent skills, member-owned mailbox connectors, revision approval, a reconciled outbox, an inbox and cohort reports. The provider matrix records the available tests and external release gates. [Operator guide](docs/operations/self-host.md) · [Validation results](docs/operations/acceptance.md)
+
+## Run a persistent workspace
+
+With Docker Compose, generate a private environment file and start PostgreSQL, the API and the worker.
+
+```sh
+umask 077
+{
+  echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)"
+  echo "MAILOOP_DB_PASSWORD=$(openssl rand -hex 24)"
+  echo "MAILOOP_MASTER_KEY=$(openssl rand -base64 32)"
+} > .env
+docker compose up -d --build
+docker compose run --rm migrate node --import tsx scripts/manage.ts workspace "Partnerships"
+```
+
+Open the private workspace link printed by the last command. Create a campaign, invite a reviewer and connect a mailbox under **Connections**. Each mailbox owner delegates access to specific campaigns. Use a simulated sender ending in `.example` for a local walkthrough. External sending requires an explicitly enabled deployment. [Configuration and recovery](docs/operations/self-host.md)
 
 ## Run the prototype
 

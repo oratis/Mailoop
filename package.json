@@ -7,25 +7,39 @@
     "node": ">=22.12"
   },
   "scripts": {
-    "build": "tsc --noEmit && esbuild apps/console/main.tsx --bundle --minify --outdir=dist/console",
+    "build": "tsc --noEmit && esbuild apps/console/main.tsx apps/console/workspace.tsx --bundle --minify --outdir=dist/console",
     "predemo": "npm run build",
     "demo": "tsx scripts/demo.ts",
     "cli": "tsx apps/cli.ts",
-    "test": "tsx --test tests/*.test.ts"
+    "test": "tsx --test tests/*.test.ts",
+    "start": "tsx apps/service.ts",
+    "worker": "tsx apps/service.ts worker",
+    "manage": "tsx scripts/manage.ts",
+    "plan": "tsx apps/plan.ts"
   },
   "dependencies": {
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
+    "imapflow": "^2.12.2",
+    "ipaddr.js": "^2.5.0",
+    "jose": "^6.2.18",
+    "mailparser": "^3.15.0",
+    "nodemailer": "^10.6.1",
     "pg": "^8.23.1",
     "react": "^19.3.1",
-    "react-dom": "^19.3.1"
+    "react-dom": "^19.3.1",
+    "tsx": "^4.23.15"
   },
   "devDependencies": {
+    "@playwright/test": "^1.65.1",
+    "@types/mailparser": "^3.9.0",
     "@types/node": "^24.19.2",
+    "@types/nodemailer": "^8.0.2",
     "@types/pg": "^8.23.1",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "embedded-postgres": "^18.7.0-beta.19",
     "esbuild": "^0.28.2",
-    "tsx": "^4.23.15",
     "typescript": "~5.9.3"
   }
 }

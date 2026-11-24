@@ -1,6 +1,10 @@
 CREATE SCHEMA mailoop;
 SET LOCAL search_path = mailoop, pg_catalog;
-CREATE ROLE mailoop_demo_runtime NOLOGIN NOBYPASSRLS;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='mailoop_demo_runtime') THEN
+    CREATE ROLE mailoop_demo_runtime NOLOGIN NOBYPASSRLS;
+  END IF;
+END $$;
 
 CREATE TABLE workspaces (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
