@@ -19,14 +19,14 @@ Open the **Coffee Studio** workspace URL printed in the terminal. Review the evi
 
 To exercise recovery, start with `npm run demo -- --lose-receipt`. The simulated provider accepts the first send and drops the acknowledgement. The worker reconciles it using the original receipt. The activity history records the interruption.
 
-For the CLI, set `MAILOOP_URL` to the printed local origin and `MAILOOP_TOKEN` to the token from your own workspace URL. Run the following against the same demo:
+For the CLI, set `MAILOOP_URL` to the printed local origin and `MAILOOP_TOKEN` to the token from your own workspace URL. Create a sample and copy its returned `id` and `revision` into the shell variables `CAMPAIGN_ID` and `REVISION`.
 
 ```sh
 npm run cli -- list
 npm run cli -- create "Coffee follow-up"
-npm run cli -- show <campaign-id>
-npm run cli -- approve <campaign-id> <reviewed-revision>
-npm run cli -- events <campaign-id> 0
+npm run cli -- show "$CAMPAIGN_ID"
+npm run cli -- approve "$CAMPAIGN_ID" "$REVISION"
+npm run cli -- events "$CAMPAIGN_ID" 0
 ```
 
 Use the sequence number of the last event in place of `0` to resume. `npm run build` type-checks the project and bundles the Console. `npm test` starts a separate PostgreSQL cluster for API, worker, isolation, and CLI integration tests.
